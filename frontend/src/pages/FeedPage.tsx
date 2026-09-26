@@ -1,27 +1,37 @@
 import { useEffect, useState } from 'react'
 import { Card, Tabs, Tag, Space, Typography, Button, Empty, message, Row, Col } from 'antd'
-import { LikeOutlined, CommentOutlined, EyeOutlined, FireOutlined, StarOutlined } from '@ant-design/icons'
+import { LikeOutlined, CommentOutlined, EyeOutlined, FireOutlined, StarOutlined, StarFilled } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { request } from '../api/client'
 import type { PageResult, Post } from '../types'
 import { getIdentity } from '../utils/storage'
+
+type ViewMode = 'latest' | 'hot' | 'favorites'
 
 export default function FeedPage() {
   const navigate = useNavigate()
   const [posts, setPosts] = useState<Post[]>([])
   const [featured, setFeatured] = useState<Post[]>([])
   const [loading, setLoading] = useState(false)
-  const [view, setView] = useState<'latest' | 'hot'>('latest')
+  const [view, setView] = useState<ViewMode>('latest')
+  const [favoritePending, setFavoritePending] = useState<Set<number>>(new Set())
 
-  const load = async (mode: 'latest' | 'hot') => {
+  const load = async (mode: ViewMode) => {
     setLoading(true)
     try {
       if (mode === 'latest') {
         const data = await request<PageResult<Post>>('get', '/posts', { page: 1, page_size: 20 })
         setPosts(data.items)
-      } else {
+      } else if (mode === 'hot') {
         const data = await request<Post[]>('get', '/posts/hot')
         setPosts(data)
+      } else {
+        if (!getIdentity()) {
+          setPosts([])
+          return
+        }
+        const data = await request<PageResult<Post>>('get', '/favorites', { page: 1, page_size: 20 })
+        setPosts(data.items)
       }
     } catch (e) {
       message.error((e as Error).message)
@@ -39,9 +49,18 @@ export default function FeedPage() {
     }
   }
 
+  // 切换匿名身份（登录/换号）后重新加载，收藏状态与列表按新身份展示。
+  useEffect(() => {
+    const reload = () => load(view)
+    window.addEventListener('gbtreehole:identity-changed', reload)
+    return () => window.removeEventListener('gbtreehole:identity-changed', reload)
+  }, [view])
+
   useEffect(() => {
     load(view)
-    loadFeatured()
+    if (view !== 'favorites') {
+      loadFeatured()
+    }
   }, [view])
 
   const like = async (postId: number, e: React.MouseEvent) => {
@@ -51,10 +70,48 @@ export default function FeedPage() {
       return
     }
     try {
-      await request<{ liked: boolean; likeCount: number }>('post', '/likes/toggle', { targetType: 'post', targetId: postId })
-      load(view)
+      const res = await request<{ liked: boolean; likeCount: number }>('post', '/likes/toggle', { targetType: 'post', targetId: postId })
+      // 以服务端返回为准，避免重复点击导致前端状态漂移
+      setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, liked: res.liked, likeCount: res.likeCount } : p)))
     } catch (err) {
       message.error((err as Error).message)
+    }
+  }
+
+  const toggleFavorite = async (postId: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const identity = getIdentity()
+    if (!identity) {
+      message.warning('请先创建匿名身份')
+      return
+    }
+    // 请求进行中忽略重复点击，最终状态与数量一律以服务端响应为准
+    if (favoritePending.has(postId)) {
+      return
+    }
+    setFavoritePending((prev) => new Set(prev).add(postId))
+    const current = posts.find((p) => p.id === postId)
+    const willAdd = !current?.favorited
+    try {
+      const res = await request<{ favorited: boolean; favoriteCount: number }>(
+        willAdd ? 'post' : 'delete',
+        `/posts/${postId}/favorite`,
+      )
+      setPosts((prev) =>
+        prev
+          // 在“我的收藏”里取消收藏后直接移除该卡片
+          .filter((p) => !(view === 'favorites' && p.id === postId && !res.favorited))
+          .map((p) => (p.id === postId ? { ...p, favorited: res.favorited, favoriteCount: res.favoriteCount } : p)),
+      )
+      message.success(res.favorited ? '已收藏' : '已取消收藏')
+    } catch (err) {
+      message.error((err as Error).message)
+    } finally {
+      setFavoritePending((prev) => {
+        const next = new Set(prev)
+        next.delete(postId)
+        return next
+      })
     }
   }
 
@@ -90,6 +147,16 @@ export default function FeedPage() {
               <Button size="small" type={post.liked ? 'primary' : 'text'} icon={<LikeOutlined />} onClick={(e) => like(post.id, e)}>
                 {post.likeCount}
               </Button>
+              <Button
+                size="small"
+                type={post.favorited ? 'primary' : 'text'}
+                ghost={post.favorited}
+                icon={post.favorited ? <StarFilled /> : <StarOutlined />}
+                loading={favoritePending.has(post.id)}
+                onClick={(e) => toggleFavorite(post.id, e)}
+              >
+                {post.favoriteCount}
+              </Button>
               <Typography.Text type="secondary"><CommentOutlined /> {post.commentCount}</Typography.Text>
               <Typography.Text type="secondary"><EyeOutlined /> {post.viewCount}</Typography.Text>
               {post.isFeatured && <Typography.Text type="warning"><StarOutlined /> 精选</Typography.Text>}
@@ -102,7 +169,7 @@ export default function FeedPage() {
 
   return (
     <div>
-      {featured.length > 0 && (
+      {view !== 'favorites' && featured.length > 0 && (
         <Card title={<span><StarOutlined style={{ color: '#faad14' }} /> 每日精选</span>} style={{ marginBottom: 16 }}>
           <Row gutter={12}>
             {featured.slice(0, 3).map((p) => (
@@ -120,13 +187,16 @@ export default function FeedPage() {
       <Card>
         <Tabs
           activeKey={view}
-          onChange={(key) => setView(key as 'latest' | 'hot')}
+          onChange={(key) => setView(key as ViewMode)}
           items={[
             { key: 'latest', label: '最新帖子' },
             { key: 'hot', label: '热度排行' },
+            { key: 'favorites', label: '我的收藏' },
           ]}
         />
-        {loading ? <Typography.Text>加载中...</Typography.Text> : posts.length === 0 ? <Empty description="还没有帖子，快去发布第一条吧" /> : posts.map(renderPost)}
+        {loading ? <Typography.Text>加载中...</Typography.Text> : posts.length === 0
+          ? <Empty description={view === 'favorites' ? (getIdentity() ? '还没有收藏，看到好帖子点星标收藏吧' : '请先创建匿名身份后查看收藏') : '还没有帖子，快去发布第一条吧'} />
+          : posts.map(renderPost)}
       </Card>
     </div>
   )

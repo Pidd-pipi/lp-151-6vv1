@@ -16,13 +16,14 @@ import (
 )
 
 type PostHandler struct {
-	posts  service.PostService
-	likes  service.LikeService
-	logger *slog.Logger
+	posts     service.PostService
+	likes     service.LikeService
+	favorites service.FavoriteService
+	logger    *slog.Logger
 }
 
-func NewPostHandler(posts service.PostService, likes service.LikeService, logger *slog.Logger) *PostHandler {
-	return &PostHandler{posts: posts, likes: likes, logger: logger}
+func NewPostHandler(posts service.PostService, likes service.LikeService, favorites service.FavoriteService, logger *slog.Logger) *PostHandler {
+	return &PostHandler{posts: posts, likes: likes, favorites: favorites, logger: logger}
 }
 
 // CreatePost 发布帖子
@@ -45,7 +46,7 @@ func (h *PostHandler) CreatePost(c *gin.Context) {
 		Fail(c, http.StatusInternalServerError, constants.CodeInternal, "create post failed")
 		return
 	}
-	resp := toPostResponse(post, false)
+	resp := toPostResponse(post, false, false)
 	OK(c, gin.H{"post": resp, "blocked": blocked, "hitWords": hits})
 }
 
@@ -103,7 +104,8 @@ func (h *PostHandler) GetPost(c *gin.Context) {
 		return
 	}
 	_ = h.posts.IncrementView(id)
-	resp := toPostResponse(post, c.GetUint("identityId") > 0 && h.isLiked(c.GetUint("identityId"), "post", id))
+	identityID := c.GetUint("identityId")
+	resp := toPostResponse(post, h.isMarked(identityID, "post", id, true), h.isMarked(identityID, "post", id, false))
 	OK(c, resp)
 }
 
@@ -140,44 +142,64 @@ func (h *PostHandler) FeaturedPosts(c *gin.Context) {
 }
 
 func (h *PostHandler) buildPostResponses(posts []model.Post, identityID uint) []dto.PostResponse {
-	ids := make([]uint, 0, len(posts))
-	for _, p := range posts {
-		ids = append(ids, p.ID)
-	}
-	likedMap := map[uint]bool{}
-	if identityID > 0 {
-		if m, err := h.likes.IsLiked(identityID, "post", ids); err == nil {
-			likedMap = m
-		}
-	}
-	items := make([]dto.PostResponse, 0, len(posts))
-	for _, p := range posts {
-		items = append(items, toPostResponse(&p, likedMap[p.ID]))
-	}
-	return items
+	return buildPostResponses(h.likes, h.favorites, posts, identityID)
 }
 
-func (h *PostHandler) isLiked(identityID uint, targetType string, targetID uint) bool {
-	m, err := h.likes.IsLiked(identityID, targetType, []uint{targetID})
+// isMarked 查询当前身份对帖子的点赞/收藏状态；liked=true 查点赞，否则查收藏。
+func (h *PostHandler) isMarked(identityID uint, targetType string, targetID uint, liked bool) bool {
+	ids := []uint{targetID}
+	if liked {
+		m, err := h.likes.IsLiked(identityID, targetType, ids)
+		if err != nil {
+			return false
+		}
+		return m[targetID]
+	}
+	m, err := h.favorites.IsFavorited(identityID, ids)
 	if err != nil {
 		return false
 	}
 	return m[targetID]
 }
 
-func toPostResponse(post *model.Post, liked bool) dto.PostResponse {
+// buildPostResponses 批量补全当前身份对帖子的点赞、收藏状态。
+func buildPostResponses(likes service.LikeService, favorites service.FavoriteService, posts []model.Post, identityID uint) []dto.PostResponse {
+	ids := make([]uint, 0, len(posts))
+	for _, p := range posts {
+		ids = append(ids, p.ID)
+	}
+	likedMap := map[uint]bool{}
+	favoritedMap := map[uint]bool{}
+	if identityID > 0 {
+		if m, err := likes.IsLiked(identityID, "post", ids); err == nil {
+			likedMap = m
+		}
+		if m, err := favorites.IsFavorited(identityID, ids); err == nil {
+			favoritedMap = m
+		}
+	}
+	items := make([]dto.PostResponse, 0, len(posts))
+	for _, p := range posts {
+		items = append(items, toPostResponse(&p, likedMap[p.ID], favoritedMap[p.ID]))
+	}
+	return items
+}
+
+func toPostResponse(post *model.Post, liked, favorited bool) dto.PostResponse {
 	resp := dto.PostResponse{
-		ID:           post.ID,
-		IdentityID:   post.IdentityID,
-		Title:        post.Title,
-		Content:      post.Content,
-		Status:       post.Status,
-		LikeCount:    post.LikeCount,
-		CommentCount: post.CommentCount,
-		ViewCount:    post.ViewCount,
-		IsFeatured:   post.IsFeatured,
-		Liked:        liked,
-		CreatedAt:    post.CreatedAt.Format(time.RFC3339),
+		ID:            post.ID,
+		IdentityID:    post.IdentityID,
+		Title:         post.Title,
+		Content:       post.Content,
+		Status:        post.Status,
+		LikeCount:     post.LikeCount,
+		FavoriteCount: post.FavoriteCount,
+		CommentCount:  post.CommentCount,
+		ViewCount:     post.ViewCount,
+		IsFeatured:    post.IsFeatured,
+		Liked:         liked,
+		Favorited:     favorited,
+		CreatedAt:     post.CreatedAt.Format(time.RFC3339),
 	}
 	if post.Identity != nil {
 		resp.Nickname = post.Identity.Nickname

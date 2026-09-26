@@ -98,6 +98,47 @@ paths:
       responses:
         '200':
           description: 帖子详情
+  /api/v1/posts/{id}/favorite:
+    post:
+      summary: 收藏帖子（幂等，重复收藏不产生重复记录）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 收藏结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  favorited: { type: boolean }
+                  favoriteCount: { type: integer }
+    delete:
+      summary: 取消收藏（幂等）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 收藏结果
+  /api/v1/favorites:
+    get:
+      summary: 我的收藏（按最近收藏时间倒序，被审核屏蔽的帖子自动隐藏、放行后重新出现）
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: page_size
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 分页帖子列表
   /api/v1/posts/{id}/comments:
     get:
       summary: 帖子评论列表

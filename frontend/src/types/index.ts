@@ -22,10 +22,12 @@ export interface Post {
   images: string[]
   status: number
   likeCount: number
+  favoriteCount: number
   commentCount: number
   viewCount: number
   isFeatured: boolean
   liked: boolean
+  favorited: boolean
   tags: Tag[]
   createdAt: string
 }

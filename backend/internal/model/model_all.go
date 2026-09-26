@@ -8,6 +8,7 @@ func AllModels() []any {
 		&Post{},
 		&Comment{},
 		&Like{},
+		&Favorite{},
 		&SensitiveWord{},
 		&ReviewQueue{},
 	}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card, Space, Typography, Button, Input, List, message, Tag, Avatar } from 'antd'
-import { LikeOutlined, CommentOutlined, EyeOutlined } from '@ant-design/icons'
+import { LikeOutlined, CommentOutlined, EyeOutlined, StarOutlined, StarFilled } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { request } from '../api/client'
 import type { Comment, PageResult, Post } from '../types'
@@ -12,6 +12,7 @@ export default function PostDetailPage() {
   const [post, setPost] = useState<Post | null>(null)
   const [comments, setComments] = useState<Comment[]>([])
   const [commentText, setCommentText] = useState('')
+  const [favoritePending, setFavoritePending] = useState(false)
 
   const load = async () => {
     try {
@@ -26,6 +27,12 @@ export default function PostDetailPage() {
 
   useEffect(() => {
     load()
+  }, [id])
+
+  // 切换匿名身份后重新拉取，收藏状态按当前身份展示
+  useEffect(() => {
+    window.addEventListener('gbtreehole:identity-changed', load)
+    return () => window.removeEventListener('gbtreehole:identity-changed', load)
   }, [id])
 
   const likePost = async () => {
@@ -51,6 +58,29 @@ export default function PostDetailPage() {
       load()
     } catch (e) {
       message.error((e as Error).message)
+    }
+  }
+
+  const toggleFavorite = async () => {
+    if (!getIdentity()) {
+      message.warning('请先创建匿名身份')
+      return
+    }
+    if (favoritePending || !post) {
+      return
+    }
+    setFavoritePending(true)
+    try {
+      const res = await request<{ favorited: boolean; favoriteCount: number }>(
+        post.favorited ? 'delete' : 'post',
+        `/posts/${id}/favorite`,
+      )
+      setPost((prev) => (prev ? { ...prev, favorited: res.favorited, favoriteCount: res.favoriteCount } : prev))
+      message.success(res.favorited ? '已收藏' : '已取消收藏')
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setFavoritePending(false)
     }
   }
 
@@ -98,6 +128,15 @@ export default function PostDetailPage() {
             <Space size="large" style={{ marginTop: 8 }}>
               <Button type={post.liked ? 'primary' : 'text'} icon={<LikeOutlined />} onClick={likePost}>
                 {post.likeCount}
+              </Button>
+              <Button
+                type={post.favorited ? 'primary' : 'text'}
+                ghost={post.favorited}
+                icon={post.favorited ? <StarFilled /> : <StarOutlined />}
+                loading={favoritePending}
+                onClick={toggleFavorite}
+              >
+                {post.favoriteCount}
               </Button>
               <Typography.Text type="secondary"><CommentOutlined /> {post.commentCount}</Typography.Text>
               <Typography.Text type="secondary"><EyeOutlined /> {post.viewCount}</Typography.Text>

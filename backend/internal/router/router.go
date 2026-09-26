@@ -17,6 +17,7 @@ func New(
 	comment *handler.CommentHandler,
 	tag *handler.TagHandler,
 	like *handler.LikeHandler,
+	favorite *handler.FavoriteHandler,
 	admin *handler.AdminHandler,
 	identityMW *middleware.IdentityAuthMiddleware,
 	sensitiveMW *middleware.SensitiveWordMiddleware,
@@ -48,6 +49,8 @@ func New(
 			postGroup.GET("/hot", post.HotPosts)
 			postGroup.GET("/featured", post.FeaturedPosts)
 			postGroup.GET("/:id", post.GetPost)
+			postGroup.POST("/:id/favorite", identityMW.RequireAuth(), favorite.AddFavorite)
+			postGroup.DELETE("/:id/favorite", identityMW.RequireAuth(), favorite.RemoveFavorite)
 			postGroup.GET("/:id/comments", comment.ListComments)
 		}
 
@@ -67,6 +70,12 @@ func New(
 		likeGroup.Use(identityMW.RequireAuth())
 		{
 			likeGroup.POST("/toggle", like.ToggleLike)
+		}
+
+		favoriteGroup := api.Group("/favorites")
+		favoriteGroup.Use(identityMW.RequireAuth())
+		{
+			favoriteGroup.GET("", favorite.ListFavorites)
 		}
 
 		adminGroup := api.Group("/admin")
