@@ -55,6 +55,7 @@ func main() {
 	commentRepo := repository.NewCommentRepository(db)
 	tagRepo := repository.NewTagRepository(db)
 	likeRepo := repository.NewLikeRepository(db)
+	favoriteRepo := repository.NewFavoriteRepository(db)
 	sensitiveRepo := repository.NewSensitiveWordRepository(db)
 	reviewRepo := repository.NewReviewQueueRepository(db)
 
@@ -67,22 +68,24 @@ func main() {
 	postService := service.NewPostService(postRepo, tagService, sensitiveService, reviewService, logger)
 	commentService := service.NewCommentService(commentRepo, postRepo, sensitiveService, reviewService, logger)
 	likeService := service.NewLikeService(likeRepo, postRepo, commentRepo, logger)
+	favoriteService := service.NewFavoriteService(favoriteRepo, postRepo, logger)
 	_ = service.NewHeatService(postRepo, logger)
 	_ = service.NewCacheService(redisClient)
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(identityService, logger)
-	postHandler := handler.NewPostHandler(postService, likeService, logger)
+	postHandler := handler.NewPostHandler(postService, likeService, favoriteService, logger)
 	commentHandler := handler.NewCommentHandler(commentService, likeService, logger)
 	tagHandler := handler.NewTagHandler(tagService, logger)
 	likeHandler := handler.NewLikeHandler(likeService, logger)
+	favoriteHandler := handler.NewFavoriteHandler(favoriteService, likeService, logger)
 	adminHandler := handler.NewAdminHandler(reviewService, postService, sensitiveService, tagService, logger)
 
 	// Middleware
 	identityMW := middleware.NewIdentityAuthMiddleware(tokenService)
 	sensitiveMW := middleware.NewSensitiveWordMiddleware(sensitiveService, logger)
 
-	engine := router.New(logger, authHandler, postHandler, commentHandler, tagHandler, likeHandler, adminHandler, identityMW, sensitiveMW)
+	engine := router.New(logger, authHandler, postHandler, commentHandler, tagHandler, likeHandler, favoriteHandler, adminHandler, identityMW, sensitiveMW)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.BackendPort,

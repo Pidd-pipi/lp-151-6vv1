@@ -26,11 +26,11 @@ type PostService interface {
 }
 
 type postService struct {
-	posts  repository.PostRepository
-	tags   TagService
+	posts     repository.PostRepository
+	tags      TagService
 	sensitive SensitiveWordService
-	review ReviewService
-	logger *slog.Logger
+	review    ReviewService
+	logger    *slog.Logger
 }
 
 func NewPostService(posts repository.PostRepository, tags TagService, sensitive SensitiveWordService, review ReviewService, logger *slog.Logger) PostService {

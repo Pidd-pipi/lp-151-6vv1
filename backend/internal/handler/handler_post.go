@@ -16,13 +16,14 @@ import (
 )
 
 type PostHandler struct {
-	posts  service.PostService
-	likes  service.LikeService
-	logger *slog.Logger
+	posts     service.PostService
+	likes     service.LikeService
+	favorites service.FavoriteService
+	logger    *slog.Logger
 }
 
-func NewPostHandler(posts service.PostService, likes service.LikeService, logger *slog.Logger) *PostHandler {
-	return &PostHandler{posts: posts, likes: likes, logger: logger}
+func NewPostHandler(posts service.PostService, likes service.LikeService, favorites service.FavoriteService, logger *slog.Logger) *PostHandler {
+	return &PostHandler{posts: posts, likes: likes, favorites: favorites, logger: logger}
 }
 
 // CreatePost 发布帖子
@@ -103,7 +104,11 @@ func (h *PostHandler) GetPost(c *gin.Context) {
 		return
 	}
 	_ = h.posts.IncrementView(id)
-	resp := toPostResponse(post, c.GetUint("identityId") > 0 && h.isLiked(c.GetUint("identityId"), "post", id))
+	identityID := c.GetUint("identityId")
+	resp := toPostResponse(post, identityID > 0 && h.isLiked(identityID, "post", id))
+	if identityID > 0 {
+		resp.Favorited = h.isFavorited(identityID, id)
+	}
 	OK(c, resp)
 }
 
@@ -145,14 +150,20 @@ func (h *PostHandler) buildPostResponses(posts []model.Post, identityID uint) []
 		ids = append(ids, p.ID)
 	}
 	likedMap := map[uint]bool{}
+	favoritedMap := map[uint]bool{}
 	if identityID > 0 {
 		if m, err := h.likes.IsLiked(identityID, "post", ids); err == nil {
 			likedMap = m
 		}
+		if m, err := h.favorites.IsFavorited(identityID, ids); err == nil {
+			favoritedMap = m
+		}
 	}
 	items := make([]dto.PostResponse, 0, len(posts))
 	for _, p := range posts {
-		items = append(items, toPostResponse(&p, likedMap[p.ID]))
+		resp := toPostResponse(&p, likedMap[p.ID])
+		resp.Favorited = favoritedMap[p.ID]
+		items = append(items, resp)
 	}
 	return items
 }
@@ -165,19 +176,28 @@ func (h *PostHandler) isLiked(identityID uint, targetType string, targetID uint)
 	return m[targetID]
 }
 
+func (h *PostHandler) isFavorited(identityID uint, targetID uint) bool {
+	m, err := h.favorites.IsFavorited(identityID, []uint{targetID})
+	if err != nil {
+		return false
+	}
+	return m[targetID]
+}
+
 func toPostResponse(post *model.Post, liked bool) dto.PostResponse {
 	resp := dto.PostResponse{
-		ID:           post.ID,
-		IdentityID:   post.IdentityID,
-		Title:        post.Title,
-		Content:      post.Content,
-		Status:       post.Status,
-		LikeCount:    post.LikeCount,
-		CommentCount: post.CommentCount,
-		ViewCount:    post.ViewCount,
-		IsFeatured:   post.IsFeatured,
-		Liked:        liked,
-		CreatedAt:    post.CreatedAt.Format(time.RFC3339),
+		ID:            post.ID,
+		IdentityID:    post.IdentityID,
+		Title:         post.Title,
+		Content:       post.Content,
+		Status:        post.Status,
+		LikeCount:     post.LikeCount,
+		FavoriteCount: post.FavoriteCount,
+		CommentCount:  post.CommentCount,
+		ViewCount:     post.ViewCount,
+		IsFeatured:    post.IsFeatured,
+		Liked:         liked,
+		CreatedAt:     post.CreatedAt.Format(time.RFC3339),
 	}
 	if post.Identity != nil {
 		resp.Nickname = post.Identity.Nickname

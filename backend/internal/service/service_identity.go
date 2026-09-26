@@ -28,9 +28,9 @@ type IdentityService interface {
 }
 
 type identityService struct {
-	repo    repository.IdentityRepository
-	token   TokenService
-	logger  *slog.Logger
+	repo   repository.IdentityRepository
+	token  TokenService
+	logger *slog.Logger
 }
 
 func NewIdentityService(repo repository.IdentityRepository, token TokenService, logger *slog.Logger) IdentityService {
